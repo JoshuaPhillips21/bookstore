@@ -13,6 +13,7 @@ gunicorn = "*"
 psycopg2 = "*"
 python-dotenv = "*"
 sqlalchemy = "*"
+flask-sqlalchemy = "*"
 
 [dev-packages]
 

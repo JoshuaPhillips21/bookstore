@@ -15,7 +15,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
-app.config["SQLALCHEMY_TACK_MODIFICATIONS"]= False
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"]= False
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 CORS(app)
 bcrypt = Bcrypt(app)
