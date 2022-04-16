@@ -9,31 +9,49 @@ import os
 
 load_dotenv()
 
-database_url ="postgresql:" + ":".join(os.environ.get("DATABASE_URL", "").split(":")[1:])
+# database_url ="postgresql:" + ":".join(os.environ.get("DATABASE_URL", "").split(":")[1:])
 app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"]= False
-app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(basedir, "app.sqlite")
 CORS(app)
 bcrypt = Bcrypt(app)
 
+user_table = db.Table('users_table', 
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id')),
+    db.Column('lib_id', db.Integer, db.ForeignKey('librarian.lib_id'))
+)
+
 class User(db.Model):
+    __tablename__ = 'user'
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, unique=True, nullable=False)
     password = db.Column(db.String, nullable=False)
+    books = db.relationship('Book', backref='user', cascade='all, delete, delete-orphan')
 
     def __init__(self, username, password):
         self.username = username
         self.password = password
 
-class UserSchema(ma.Schema):
-    class Meta:
-        fields = ('id', 'username', 'password')
-user_schema = UserSchema()
-multiple_user_schema = UserSchema(many=True)
+
+class Librarian(User):
+    __tablename__ = 'librarian'
+    
+    lib_id = db.Column(db.Integer, primary_key=True)
+    lib_username = db.Column(db.String, unique=True, nullable=False)
+    lib_password = db.Column(db.String, nullable=False)
+    canAccess = db.Column(db.Boolean, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def __init__(self, username, password, canAccess):
+        super().__init__(username, password)
+        self.lib_username = username
+        self.lib_password = password
+        self.canAccess = canAccess
 
 @app.route('/user/add', methods=['POST'])
 def add_user():
@@ -97,17 +115,21 @@ def delete_user(id):
 
 
 class Book(db.Model):
+    __tablename__ = 'book'
+
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String, nullable=False, unique=True)
     author = db.Column(db.String, nullable=False)
     review = db.Column(db.String(144), nullable=True)
     genre = db.Column(db.String, nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-    def __init__(self, title, author, review, genre):
+    def __init__(self, title, author, review, genre, user_id):
         self.title = title
         self.author = author 
         self.review = review 
-        self.genre= genre
+        self.genre = genre
+        self.user_id = user_id
 
 
 class BookSchema(ma.Schema):
@@ -128,6 +150,7 @@ def add_book():
     author = post_data.get('author')
     review = post_data.get('review')
     genre = post_data.get('genre')
+    user_id = post_data.get('user_id')
 
     book = db.session.query(Book).filter(Book.title == title).first()
 
@@ -138,7 +161,7 @@ def add_book():
     if author == None:
         return jsonify("Error: data must have a 'Author' key.")
 
-    new_book = Book(title, author, review, genre)
+    new_book = Book(title, author, review, genre, user_id)
     db.session.add(new_book)
     db.session.commit()
 
@@ -205,7 +228,48 @@ def update_book_by_id(id):
     db.session.commit()
     return jsonify("Book has been updated")
     
+class UserSchema(ma.Schema):
+    class Meta:
+        fields = ('id', 'username', 'password', 'books')
+    books = ma.Nested(multiple_book_schema)
 
+user_schema = UserSchema()
+multiple_user_schema = UserSchema(many=True)
+
+class LibrarianSchema(ma.Schema):
+    class Meta:
+        fields = ('id', 'username', 'canAccess')
+
+lib_schema = LibrarianSchema()
+multiple_lib_schema = LibrarianSchema(many=True)
+
+@app.route('/lib/add', methods=['POST'])
+def add_lib():
+    if request.content_type != 'application/json':
+        return jsonify('Error: Data must be json')
+
+    post_data = request.get_json()
+    username = post_data.get('username')
+    password = post_data.get('password')
+    canAccess = post_data.get('canAccess')
+
+    if canAccess == 'True':
+        canAccess = True
+    else: 
+        canAccess = False
+
+    possible_duplicate = db.session.query(User).filter(User.username == username).first()
+
+    if possible_duplicate is not None: 
+        return jsonify('Error: the username is taken.')
+
+    encrpted_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    new_lib = User(username, encrpted_password, canAccess)
+
+    db.session.add(new_lib)
+    db.session.commit()
+    
+    return jsonify("Congrats, you've signed up for a new librarian account")
     
 
 if __name__ == "__main__":
